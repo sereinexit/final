@@ -70,7 +70,7 @@ if __name__ == "__main__":
     parser.add_argument('-dn', dest='df_name', help='column names of dataframe',
                         default=['uid', 'iid', 'rating'])
     parser.add_argument('-s', dest='seed', help='random seed', type=int, default=0)
-    parser.add_argument('-sp', dest='split', help='split mode', default='user')  # or 'random'
+    parser.add_argument('-sp', dest='split', help='split mode', default='user')  
     parser.add_argument('-r', dest='ratio', type=ratio_without_test, default='0.8,0.2')
     parser.add_argument('-threshold', dest='threshold', default=4)
     parser.add_argument('--implicit', dest='implicit', action='store_false', default=True)

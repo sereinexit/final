@@ -4,7 +4,7 @@ import os
 import yaml
 import time
 import numpy as np
-from models.upmf1 import upmf1
+from models.upmf import upmf
 from pathlib import Path
 from scipy.sparse import load_npz
 path='/home/wyf/MF-test/'
@@ -19,7 +19,7 @@ train = load_npz(train_path).tocsr()
 validation = load_npz(valid_path).tocsr()
 test = load_npz(test_path).tocsr()
 
-RQ, X, xBias, Y, yBias = upmf1(train, validation, test, embeded_matrix=np.empty(0), iteration=1000, seed=0, source=None,
+RQ, X, xBias, Y, yBias = upmf(train, validation, test, embeded_matrix=np.empty(0), iteration=1000, seed=0, source=None,
                             problem='yahooR3/', gpu_on=True, scene='u', metric='AUC', topK=50, is_topK=False,
                             searcher='grid')
 

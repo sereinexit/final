@@ -13,7 +13,7 @@ train_path = path+'data/train_user.npz'
 valid_path = path+'data/valid_user.npz'
 test_path = path+'data/test.npz'
 table_path = path+'tables/'
-opath = 'yahooR3/op_mf_tuning_u.csv'
+opath = 'yahooR3/op_ncf_tuning_u.csv'
 dataset = 'yahooR3/'
 
 

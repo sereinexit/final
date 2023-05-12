@@ -45,7 +45,7 @@ class Objective:
         np.random.seed(self.seed)
         tf.set_random_seed(self.seed)
         
-        model = DIBNCF(self.num_users, self.num_items, np.int(rank), np.int(batch_size), lamb=lam, alpha=alpha,
+        model = UPNCF1(self.num_users, self.num_items, np.int(rank), np.int(batch_size), lamb=lam, alpha=alpha,
                        gamma=gamma, learning_rate=lr, optimizer=self.optimizer, gpu_on=self.gpu_on)
 
         score, _, _, _ = model.train_model(self.train, self.valid, self.test, self.iters, self.metric, self.topK,
@@ -74,7 +74,7 @@ class Tuner:
         return study.trials_dataframe(), study.best_params
 
 
-class DIBNCF(object):
+class UPNCF1(object):
     def __init__(self, num_users, num_items, embed_dim, batch_size,
                  lamb=0.01,
                  alpha=0.01,
@@ -112,7 +112,7 @@ class DIBNCF(object):
             user_zero_vector = tf.get_variable(
                 'user_zero_vector', [self._num_users, self._embed_dim],
                 initializer=tf.constant_initializer(0.0, dtype=tf.float32), trainable=False)
-            self.z_user_embeddings = tf.concat([z_user_embeddings, user_zero_vector], 1)
+            self.z_user_embeddings = tf.concat([user_zero_vector, z_user_embeddings], 1)
             self.c_user_embeddings = tf.concat([user_zero_vector, c_user_embeddings], 1)
 
             z_item_embeddings = tf.Variable(tf.random_normal([self._num_items, self._embed_dim],
@@ -124,7 +124,7 @@ class DIBNCF(object):
                 'item_zero_vector', [self._num_items, self._embed_dim],
                 initializer=tf.constant_initializer(0.0, dtype=tf.float32), trainable=False)
 
-            self.z_item_embeddings = tf.concat([z_item_embeddings, item_zero_vector], 1)
+            self.z_item_embeddings = tf.concat([item_zero_vector, z_item_embeddings], 1)
             self.c_item_embeddings = tf.concat([item_zero_vector, c_item_embeddings], 1)
 
             self.mlp1_weights = tf.Variable(tf.truncated_normal([self._embed_dim * 4, self._embed_dim * 2],
@@ -380,16 +380,16 @@ class DIBNCF(object):
         return best_result, best_topk_prediction, best_vrating_prediction, best_trating_prediction
 
 
-def dibncf(matrix_train, matrix_valid, matrix_test, embeded_matrix=np.empty(0), iteration=1000, lam=0.01, alpha=0.01,
+def upncf1(matrix_train, matrix_valid, matrix_test, embeded_matrix=np.empty(0), iteration=1000, lam=0.01, alpha=0.01,
            rank=200, gamma=0.01, batch_size=500, learning_rate=1e-3, optimizer="Adam", seed=0, gpu_on=False,
-           metric='AUC', topK=50, is_topK=False, searcher='optuna', n_trials=100, **unused):
+           metric='AUC', topK=50, is_topK=False, searcher='optuna', n_trials=5, **unused):
     progress = WorkSplitter()
 
-    progress.section("DIB-NCF: Set the random seed")
+    progress.section("UPNCF1: Set the random seed")
     np.random.seed(seed)
     tf.set_random_seed(seed)
 
-    progress.section("DIB-NCF: Training")
+    progress.section("UPNCF1: Training")
     matrix_input = matrix_train
     if embeded_matrix.shape[0] > 0:
         matrix_input = vstack((matrix_input, embeded_matrix.T))
@@ -404,7 +404,7 @@ def dibncf(matrix_train, matrix_valid, matrix_test, embeded_matrix=np.empty(0), 
         return trials, best_params
 
     if searcher == 'grid':
-        model = DIBNCF(m, n, rank, batch_size, lamb=lam, alpha=alpha, gamma=gamma, learning_rate=learning_rate,
+        model = UPNCF1(m, n, rank, batch_size, lamb=lam, alpha=alpha, gamma=gamma, learning_rate=learning_rate,
                        optimizer=Regularizer[optimizer], gpu_on=gpu_on)
 
         result, topk_prediction, valid_rating_prediction, test_rating_prediction = model.train_model(matrix_input,

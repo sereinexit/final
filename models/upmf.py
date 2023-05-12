@@ -38,17 +38,17 @@ class Objective:
         """Calculate an objective value."""
 
         # sample a set of hyperparameters.
-        rank = trial.suggest_discrete_uniform('rank', 60, 90, 2)
-        lam = trial.suggest_categorical('lambda', [1e-6,1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1])
+        rank = trial.suggest_discrete_uniform('rank', 5, 100, 5)
+        lam = trial.suggest_categorical('lambda', [1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1])
         batch_size = trial.suggest_categorical('batch_size', [1024, 2048, 4096, 8192, 16384])
-        lr = trial.suggest_categorical('learning_rate', [0.001,0.004,0.006, 0.005,0.0007, 0.01, 0.02,0.05])
-        alpha = trial.suggest_uniform('alpha', 0.15, 0.25)
-        gamma = trial.suggest_uniform('gamma', 0.01, 0.05)
+        lr = trial.suggest_categorical('learning_rate', [0.001, 0.005, 0.01, 0.05, 0.1])
+        alpha = trial.suggest_uniform('alpha', 0.1, 0.2)
+        gamma = trial.suggest_uniform('gamma', 0.01, 0.1)
 
         np.random.seed(self.seed)
         tf.random.set_seed(self.seed)#tf.set_random_seed(self.seed)
 
-        model = DIBMF(self.num_users, self.num_items, np.int(rank), np.int(batch_size), lamb=lam, alpha=alpha,
+        model = UPMF(self.num_users, self.num_items, np.int(rank), np.int(batch_size), lamb=lam, alpha=alpha,
                       gamma=gamma, learning_rate=lr, optimizer=self.optimizer, gpu_on=self.gpu_on)
 
         score, _, _, _, _, _ = model.train_model(self.train, self._train, self.valid, self.test, self.iters,
@@ -81,12 +81,12 @@ class Tuner:
         return study.trials_dataframe(), study.best_params
         
 
-class DIBMF(object):
+class UPMF(object):
     def __init__(self, num_users, num_items, embed_dim, batch_size,
-                 lamb=1.0e-05,
-                 alpha=0.1579413818461371,
-                 gamma=0.024362944637123594,
-                 learning_rate=0.01,
+                 lamb=0.01,
+                 alpha=0.01,
+                 gamma=0.01,
+                 learning_rate=1e-3,
                  optimizer=tf.compat.v1.train.AdamOptimizer,
                  gpu_on=False,
                  **unused):
@@ -114,19 +114,26 @@ class DIBMF(object):
             # 定义需要学习的参数Variable
             z_user_embeddings = tf.compat.v1.Variable(tf.compat.v1.random_normal([self._num_users, self._embed_dim],
                                                              stddev=1 / (self._embed_dim ** 0.5), dtype=tf.float32))
-            r_user_embeddings = tf.compat.v1.Variable(tf.compat.v1.random_normal([self._num_users, self._embed_dim],
+            c_user_embeddings = tf.compat.v1.Variable(tf.compat.v1.random_normal([self._num_users, self._embed_dim],
                                                              stddev=1 / (self._embed_dim ** 0.5), dtype=tf.float32))
-
-            self.z_user_embeddings = tf.compat.v1.concat(z_user_embeddings, 1)
-            self.r_user_embeddings = tf.compat.v1.concat(r_user_embeddings, 1)
+            # 定义不需要学习的、全0的Variable
+            user_zero_vector = tf.compat.v1.get_variable(
+                'user_zero_vector', [self._num_users, self._embed_dim],
+                initializer=tf.compat.v1.constant_initializer(0.0, dtype=tf.float32), trainable=False)
+            # 将全0的Variable与需要学习的Variable拼接在一起
+            self.z_user_embeddings = tf.compat.v1.concat([z_user_embeddings, user_zero_vector], 1)
+            self.c_user_embeddings = tf.compat.v1.concat([user_zero_vector, c_user_embeddings], 1)
 
             z_item_embeddings = tf.compat.v1.Variable(tf.compat.v1.random_normal([self._num_items, self._embed_dim],
                                                              stddev=1 / (self._embed_dim ** 0.5), dtype=tf.float32))
-            r_item_embeddings = tf.compat.v1.Variable(tf.compat.v1.random_normal([self._num_items, self._embed_dim],
+            c_item_embeddings = tf.compat.v1.Variable(tf.compat.v1.random_normal([self._num_items, self._embed_dim],
                                                              stddev=1 / (self._embed_dim ** 0.5), dtype=tf.float32))
+            item_zero_vector = tf.compat.v1.get_variable(
+                'item_zero_vector', [self._num_items, self._embed_dim],
+                initializer=tf.compat.v1.constant_initializer(0.0, dtype=tf.float32), trainable=False)
 
-            self.z_item_embeddings = tf.compat.v1.concat(z_item_embeddings, 1)
-            self.r_item_embeddings = tf.compat.v1.concat(r_item_embeddings, 1)
+            self.z_item_embeddings = tf.compat.v1.concat([z_item_embeddings, item_zero_vector], 1)
+            self.c_item_embeddings = tf.compat.v1.concat([item_zero_vector, c_item_embeddings], 1)
 
             
 
@@ -135,22 +142,22 @@ class DIBMF(object):
                 z_items = tf.nn.embedding_lookup(self.z_item_embeddings, self.item_idx)
                 z_x_ij = tf.reduce_sum(tf.multiply(z_users, z_items), axis=1)
                 #从嵌入矩阵中查找用户嵌入向量和物品嵌入向量，并进行逐元素相乘和求和，得到评分预测值。
-                r_users = tf.nn.embedding_lookup(self.r_user_embeddings, self.user_idx)
-                r_items = tf.nn.embedding_lookup(self.r_item_embeddings, self.item_idx)
-                r_x_ij = tf.reduce_sum(tf.multiply(r_users, r_items), axis=1)
+                c_users = tf.nn.embedding_lookup(self.c_user_embeddings, self.user_idx)
+                c_items = tf.nn.embedding_lookup(self.c_item_embeddings, self.item_idx)
+                c_x_ij = tf.reduce_sum(tf.multiply(c_users, c_items), axis=1)
 
-                zr_users = z_users + r_users
-                zr_items = z_items + r_items
-                zr_x_ij = tf.reduce_sum(tf.multiply(zr_users, zr_items), axis=1)
+                zc_users = z_users + c_users
+                zc_items = z_items + c_items
+                zc_x_ij = tf.reduce_sum(tf.multiply(zc_users, zc_items), axis=1)
 
-                mf_loss = tf.reduce_mean(
+                upmf_loss = tf.reduce_mean(
                     (1 - self._alpha) * tf.nn.sigmoid_cross_entropy_with_logits(logits=z_x_ij, labels=self.label) -
-                    self._gamma * tf.nn.sigmoid_cross_entropy_with_logits(logits=r_x_ij, labels=self.label) +
-                    self._alpha * tf.nn.sigmoid_cross_entropy_with_logits(logits=zr_x_ij, labels=self.label))
+                    self._gamma * tf.nn.sigmoid_cross_entropy_with_logits(logits=c_x_ij, labels=self.label) +
+                    self._alpha * tf.nn.sigmoid_cross_entropy_with_logits(logits=zc_x_ij, labels=self.label))
 
-                self.z = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=z_x_ij, labels=self.label))
-                self.r = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=r_x_ij, labels=self.label))
-                self.zr = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=zr_x_ij, labels=self.label))
+                self.a = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=z_x_ij, labels=self.label))
+                self.b = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=c_x_ij, labels=self.label))
+                self.c = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=zc_x_ij, labels=self.label))
 
             with tf.compat.v1.variable_scope('l2_loss'):
                 unique_user_idx, _ = tf.unique(self.user_idx)
@@ -162,7 +169,7 @@ class DIBMF(object):
                 l2_loss = tf.reduce_mean(tf.nn.l2_loss(unique_users)) + tf.reduce_mean(tf.nn.l2_loss(unique_items))
 
             with tf.compat.v1.variable_scope('loss'):
-                self._loss = mf_loss + self._lamb * l2_loss
+                self._loss = upmf_loss + self._lamb * l2_loss
 
             with tf.compat.v1.variable_scope('optimizer'):
                 optimizer = self._optimizer(learning_rate=self._learning_rate)
@@ -180,25 +187,27 @@ class DIBMF(object):
             self.sess.run(init)
 
     @staticmethod
-    #生成一个二维数组，其中每个元素都是一个由两个整数组成的元组，表示用户和物品的索引
+    #用于生成所有用户和物品之间的组合
     def generate_total_sample(num_users, num_items):
+        #包含所有用户编号和物品编号
         r0 = np.arange(num_users)
         r1 = np.arange(num_items)
-
+        #拼接
         out = np.empty((num_users, num_items, 2), dtype=np.dtype(np.int32))
         out[:, :, 0] = r0[:, None]
         out[:, :, 1] = r1
+        #每一行是一个用户和物品的组合
 
         return out.reshape(-1, 2)
 
     @staticmethod
-    #生成一个二维数组，其中每个元素都是一个由两个整数组成的元组，表示用户和物品的索引
+    #生成训练集的批次，包括正样本和未标记的负样本
     def get_batches(pos_ui, num_pos, unlabeled_ui, num_unlabeled, batch_size):
-        # 生成一个随机的索引数组，用于从正样本中抽取batch_size个样本
+        # 从正样本中抽取batch_size个样本
         pos_idx = np.random.choice(np.arange(num_pos), size=np.int(batch_size))
-        # 生成一个随机的索引数组，用于从负样本中抽取1.5*batch_size个样本
+        # 从未标记样本中抽取1.5*batch_size个样本
         unlabeled_idx = np.random.choice(np.arange(num_unlabeled), size=np.int(1.5 * batch_size))
-        # 将正样本数据的随机索引和未标记样本数据的随机索引合并为一个训练集。
+        # 合并为一个训练集。
         train_batch = np.r_[pos_ui[pos_idx], unlabeled_ui[unlabeled_idx]]
         # 训练集的标签为训练集的第3列数据，即用户和商品的交互标记
         train_label = train_batch[:, 2]
@@ -249,7 +258,7 @@ class DIBMF(object):
                          self.label: train_label,
                          }
             # 运行模型，同时获取模型的损失函数值
-            _, z, r, zr = self.sess.run([self._train, self.z, self.r, self.zr], feed_dict=feed_dict)
+            _, a, b, c = self.sess.run([self._train, self.a, self.b, self.c], feed_dict=feed_dict)
             # 获取当前模型的隐向量矩阵
             RQ, Y = self.sess.run([self.z_user_embeddings, self.z_item_embeddings])
             # 对测试集进行评估，计算评估指标
@@ -290,24 +299,24 @@ class DIBMF(object):
                 # 打印测试集上的评估指标
                 print("Epoch {0} Test {1}:{2}".format(i, _metric, test_result[_metric]))
             # 打印损失函数值
-            print("Epoch {0} z {1} r {2} zr {3}".format(i, z, r, zr))
+            print("Epoch {0} a {1} b {2} c {3}".format(i, a, b, c))
 
         return best_result, best_RQ, best_X, best_xBias, best_Y.T, best_yBias
 
 
-def dibmf(matrix_train, matrix_valid, matrix_test, embeded_matrix=np.empty(0), iteration=500, lam=1.0e-05, alpha=0.19683954248159508,
-          rank=65, gamma=0.013880007794639652, batch_size=8192, learning_rate=0.005, optimizer="Adam", seed=0, gpu_on=False,
-          metric='AUC', topK=50, is_topK=False, searcher='optuna', n_trials=200, **unused):
+def upmf(matrix_train, matrix_valid, matrix_test, embeded_matrix=np.empty(0), iteration=500, lam=0.01, alpha=0.10273626485512183,
+          rank=200, gamma=0.02645887072018175, batch_size=500, learning_rate=0.005, optimizer="Adam", seed=0, gpu_on=False,
+          metric='AUC', topK=50, is_topK=False, searcher='optuna', n_trials=100, **unused):
     # 使用 WorkSplitter 模块打印进度信息
     progress = WorkSplitter()
     # 打印“设置随机种子”的信息
-    progress.section("DIB-MF1: Set the random seed")
+    progress.section("UPMF: Set the random seed")
     np.random.seed(seed)
-    tf.random.set_seed(seed)
+    tf.random.set_seed(seed)#tf.set_random_seed(seed)
 
-    progress.section("DIB-MF1: Training")
+    progress.section("UPMF: Training")
     # 构造一个形状和训练矩阵相同的稀疏矩阵
-    temp_matrix_train = csr_matrix(matrix_train.shape)
+    temp_matrix_train = csr_matrix(matrix_train.shape)#matrix_train.shape
     # 将训练矩阵中的非零元素置为1
     temp_matrix_train[(matrix_train > 0).nonzero()] = 1
     _matrix_train = temp_matrix_train
@@ -329,14 +338,14 @@ def dibmf(matrix_train, matrix_valid, matrix_test, embeded_matrix=np.empty(0), i
 
     if searcher == 'grid':
         # 如果使用grid作为超参数搜索器，则创建DIBMF模型对象并进行训练
-        model = DIBMF(m, n, rank, batch_size, lamb=lam, alpha=alpha, gamma=gamma, learning_rate=learning_rate,
+        model = UPMF(m, n, rank, batch_size, lamb=lam, alpha=alpha, gamma=gamma, learning_rate=learning_rate,
                       optimizer=Regularizer[optimizer], gpu_on=gpu_on)
 
         _, RQ, X, xBias, Y, yBias = model.train_model(matrix_input, matrix_train, matrix_valid, matrix_test, iteration,
                                                       metric, topK, is_topK, gpu_on, seed)
 
         model.sess.close()
-        tf.compat.v1.reset_default_graph()
+        tf.reset_default_graph()
 
         return RQ, X, xBias, Y, yBias
 

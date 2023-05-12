@@ -4,7 +4,7 @@ import os
 import yaml
 import time
 import numpy as np
-from models.dib_mf import dibmf
+from models.upmf import upmf
 from pathlib import Path
 from scipy.sparse import load_npz
 path='/home/wyf/MF-test/'
@@ -19,7 +19,7 @@ train = load_npz(train_path).tocsr()
 validation = load_npz(valid_path).tocsr()
 test = load_npz(test_path).tocsr()
 
-trials, best_params = dibmf(train, validation, test, embeded_matrix=np.empty(0), iteration=500, seed=0, source=None,
+trials, best_params = upmf(train, validation, test, embeded_matrix=np.empty(0), iteration=500, seed=0, source=None,
                             problem='yahooR3/', gpu_on=True, scene='u', metric='AUC', topK=50, is_topK=False,
                             searcher='optuna')
 
@@ -36,6 +36,6 @@ else:
               open(table_path + dataset + 'op_hyper_params_u.yml', 'w'), default_flow_style=False)
 time.sleep(0.5)
 hyper_params_dict = yaml.safe_load(open(table_path + dataset + 'op_hyper_params_u.yml', 'r'))
-hyper_params_dict['yahooR3']['DIB-MF'] = best_params
+hyper_params_dict['yahooR3']['UPMF'] = best_params
 yaml.dump(hyper_params_dict, open(table_path + dataset + 'op_hyper_params_u.yml', 'w'),
           default_flow_style=False)
